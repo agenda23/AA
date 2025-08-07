@@ -65,6 +65,9 @@
             user-select: none;
             -webkit-user-select: none;
             -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            -webkit-touch-callout: none;
+            transition: all 0.1s ease;
         }
         
         .controls button:hover, .controls button:active {
@@ -76,6 +79,14 @@
             transform: scale(0.95);
         }
         
+        @media (hover: none) and (pointer: coarse) {
+            .controls button:active {
+                background: #00ff00 !important;
+                color: #000 !important;
+                transform: scale(0.92);
+            }
+        }
+        
         .effect-btn {
             background: #440000 !important;
             border-color: #ff4040 !important;
@@ -85,6 +96,14 @@
         .effect-btn:hover, .effect-btn:active {
             background: #ff4040 !important;
             color: #000 !important;
+        }
+        
+        @media (hover: none) and (pointer: coarse) {
+            .effect-btn:active {
+                background: #ff4040 !important;
+                color: #000 !important;
+                transform: scale(0.92);
+            }
         }
         
         .info-display {
@@ -980,17 +999,43 @@
                     this.reset();
                 });
                 
-                // タッチイベントの最適化
+                // タッチイベントの最適化 - iOS Safari対応
                 document.querySelectorAll('.controls button').forEach(button => {
+                    // 即座にクリック処理を行うタッチイベント
                     button.addEventListener('touchstart', (e) => {
                         e.preventDefault();
-                        button.style.transform = 'scale(0.95)';
+                        e.stopPropagation();
+                        button.style.transform = 'scale(0.92)';
+                        button.style.filter = 'brightness(1.2)';
+                        
+                        // 即座にクリックイベントを実行
+                        const clickEvent = new Event('click', { bubbles: true, cancelable: true });
+                        button.dispatchEvent(clickEvent);
                     }, { passive: false });
                     
                     button.addEventListener('touchend', (e) => {
                         e.preventDefault();
-                        button.style.transform = 'scale(1)';
+                        e.stopPropagation();
+                        setTimeout(() => {
+                            button.style.transform = 'scale(1)';
+                            button.style.filter = 'none';
+                        }, 100);
                     }, { passive: false });
+                    
+                    // 通常のクリックイベントでの重複処理を防ぐ
+                    let touchHandled = false;
+                    button.addEventListener('touchstart', () => {
+                        touchHandled = true;
+                        setTimeout(() => { touchHandled = false; }, 300);
+                    }, { passive: true });
+                    
+                    const originalClick = button.onclick;
+                    button.addEventListener('click', (e) => {
+                        if (touchHandled) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }
+                    }, { capture: true });
                 });
                 
                 // キーボード操作（デスクトップ向け補助）
