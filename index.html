@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>Advanced ASCII Art</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+            cursor: crosshair;
+            touch-action: none;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            -khtml-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        
+        #canvas {
+            display: block;
+            width: 100%;
+            height: 100vh;
+        }
+        
+        .controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            z-index: 100;
+            color: #00ff00;
+            font-size: 12px;
+            background: rgba(0,0,0,0.9);
+            padding: 8px;
+            border: 1px solid #00ff00;
+            border-radius: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            max-width: 200px;
+        }
+        
+        .controls button {
+            background: #000;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            padding: 8px;
+            margin: 0;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            border-radius: 4px;
+            min-width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        .controls button:hover, .controls button:active {
+            background: #00ff00;
+            color: #000;
+        }
+        
+        .controls button:active {
+            transform: scale(0.95);
+        }
+        
+        .effect-btn {
+            background: #440000 !important;
+            border-color: #ff4040 !important;
+            color: #ff4040 !important;
+        }
+        
+        .effect-btn:hover, .effect-btn:active {
+            background: #ff4040 !important;
+            color: #000 !important;
+        }
+        
+        .info-display {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            z-index: 100;
+            color: #00ff00;
+            font-size: 10px;
+            background: rgba(0,0,0,0.8);
+            padding: 6px;
+            border: 1px solid #00ff00;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <button id="font-minus" title="フォント縮小">－</button>
+        <button id="font-plus" title="フォント拡大">＋</button>
+        <button id="pattern-cycle" title="パターン切替">◆</button>
+        <button id="color-cycle" title="色テーマ変更">●</button>
+        <button id="glitch-toggle" title="グリッチ切替">⚡</button>
+        <button class="effect-btn" id="effect-invert" title="色反転爆発">🔴</button>
+        <button class="effect-btn" id="effect-crash" title="データクラッシュ">💥</button>
+        <button class="effect-btn" id="effect-wave" title="フォント波形">🌊</button>
+        <button id="reset" title="リセット">↻</button>
+    </div>
+    
+    <div class="info-display" id="info-display">
+        <div id="pattern-info">◇Random</div>
+        <div id="size-info">Font: 8px | Grid: 0×0</div>
+    </div>
+    
+    <canvas id="canvas"></canvas>
+
+    <script>
+        class MouseTrail {
+            constructor() {
+                this.points = [];
+                this.maxPoints = 20;
+            }
+            
+            addPoint(x, y, timestamp) {
+                this.points.push({ x, y, timestamp });
+                if (this.points.length > this.maxPoints) {
+                    this.points.shift();
+                }
+            }
+            
+            getSpeed() {
+                if (this.points.length < 2) return 0;
+                
+                const recent = this.points.slice(-5);
+                let totalDistance = 0;
+                let totalTime = 0;
+                
+                for (let i = 1; i < recent.length; i++) {
+                    const dx = recent[i].x - recent[i-1].x;
+                    const dy = recent[i].y - recent[i-1].y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    const time = recent[i].timestamp - recent[i-1].timestamp;
+                    
+                    totalDistance += distance;
+                    totalTime += time;
+                }
+                
+                return totalTime > 0 ? totalDistance / totalTime : 0;
+            }
+            
+            getInfluenceMap(cols, rows, actualCellWidth, actualCellHeight) {
+                const map = Array(rows).fill().map(() => Array(cols).fill(0));
+                
+                this.points.forEach((point, index) => {
+                    const age = (this.points.length - index) / this.points.length;
+                    // 渡されたセルサイズを使用
+                    const col = Math.floor(point.x / actualCellWidth);
+                    const row = Math.floor(point.y / actualCellHeight);
+                    
+                    const radius = Math.floor(10 * age);
+                    
+                    for (let r = Math.max(0, row - radius); r < Math.min(rows, row + radius + 1); r++) {
+                        for (let c = Math.max(0, col - radius); c < Math.min(cols, col + radius + 1); c++) {
+                            const distance = Math.sqrt((r - row) ** 2 + (c - col) ** 2);
+                            if (distance <= radius) {
+                                const influence = (1 - distance / radius) * age;
+                                map[r][c] = Math.max(map[r][c], influence);
+                            }
+                        }
+                    }
+                });
+                
+                return map;
+            }
+        }
+
+
+
+        class ASCIIArt {
+            constructor() {
+                this.canvas = document.getElementById('canvas');
+                this.ctx = this.canvas.getContext('2d');
+                
+                // ASCII文字セット（拡張版 - 空文字除外）
+                this.chars = ['█', '▓', '▒', '░', '┌', '┐', '└', '┘', '│', '─', '├', '┤', '┬', '┴', '┼', '+', '-', '|', '#', '*', '.'];
+                this.buildingChars = ['█', '▓', '▒', '░', '│', '─', '┌', '┐', '└', '┘'];
+                this.organicChars = ['○', '●', '◐', '◑', '◒', '◓', '◔', '◕', '◖', '◗'];
+                this.fractalChars = ['▲', '▼', '◄', '►', '◆', '◇', '◈', '◉', '◎', '●'];
+                this.destructiveChars = ['☠', '⚡', '💀', '🔥', '💥', '⭐', '🌟', '⚠', '☢', '☣'];
+                
+                // 色パレット（拡張版 - 複数テーマ）
+                this.colorThemes = [
+                    // テーマ1: サイバーパンク
+                    ['#00ff00', '#ffffff', '#0080ff', '#ff8000', '#ff0080', '#80ff00', '#ff4040', '#40ff40', '#4040ff', '#ffff40'],
+                    // テーマ2: ファイア
+                    ['#ff0000', '#ff4000', '#ff8000', '#ffff00', '#ffffff', '#ff6060', '#ff9040', '#ffb020', '#ffd000', '#ffe040'],
+                    // テーマ3: アイス
+                    ['#00ffff', '#0080ff', '#0040ff', '#8080ff', '#ffffff', '#40e0ff', '#60c0ff', '#80a0ff', '#a080ff', '#c060ff'],
+                    // テーマ4: マトリックス
+                    ['#00ff00', '#008000', '#004000', '#80ff80', '#40ff40', '#60ff60', '#20ff20', '#a0ffa0', '#c0ffc0', '#e0ffe0'],
+                    // テーマ5: ネオン
+                    ['#ff0080', '#80ff00', '#00ff80', '#8000ff', '#ff8000', '#0080ff', '#ff4080', '#80ff40', '#4080ff', '#ff8040'],
+                    // テーマ6: モノクローム
+                    ['#ffffff', '#e0e0e0', '#c0c0c0', '#a0a0a0', '#808080', '#606060', '#404040', '#202020', '#101010', '#000000'],
+                    // テーマ7: レインボー
+                    ['#ff0000', '#ff8000', '#ffff00', '#80ff00', '#00ff00', '#00ff80', '#00ffff', '#0080ff', '#0000ff', '#8000ff'],
+                    // テーマ8: ダーク
+                    ['#800000', '#008000', '#000080', '#808000', '#800080', '#008080', '#404040', '#600000', '#006000', '#000060']
+                ];
+                this.currentThemeIndex = 0;
+                this.colors = this.colorThemes[0];
+                this.currentColorIndex = 0;
+                
+                this.baseCellSize = 8;
+                this.minCellSize = 4;
+                this.maxCellSize = 32;
+                this.cols = 0;
+                this.rows = 0;
+                this.actualCellWidth = 8;  // 初期値設定
+                this.actualCellHeight = 8; // 初期値設定
+                this.grid = [];
+                this.prevGrid = [];
+                this.fontSizeMap = []; // フォントサイズマップ
+                
+                // マウス軌跡
+                this.mouseTrail = new MouseTrail();
+                this.mouseSpeed = 0;
+                
+                // アニメーション状態
+                this.time = 0;
+                this.mouseX = 0;
+                this.mouseY = 0;
+                this.glitchMode = false;
+                this.patternMode = 0;
+                
+                // グローバルエフェクト
+                this.globalEffects = {
+                    invert: 0,
+                    dataCrash: 0,
+                    waveDistort: 0
+                };
+                
+                // パターン名（英語版）
+                this.patternNames = [
+                    'Random', 'Buildings', 'Wave', 'Mandelbrot', 'Julia Set', 
+                    'Cellular', 'Spiral', 'Concentric', 'Fractal Tree', 'Organic'
+                ];
+                
+                // フラクタル設定
+                this.mandelbrotZoom = 1;
+                this.juliaC = { real: -0.8, imag: 0.156 };
+                this.cellularAutomata = [];
+                
+                this.init();
+                this.setupEvents();
+                this.animate();
+            }
+            
+            init() {
+                this.resize();
+                this.initCellularAutomata();
+                this.generatePattern();
+                this.updatePatternInfo();
+                this.updateSizeInfo();
+                this.updateButtonStates();
+            }
+            
+            resize() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+                
+                // 画面全体を確実に覆うようにセル数を計算（切り上げ）
+                this.cols = Math.ceil(this.canvas.width / this.baseCellSize);
+                this.rows = Math.ceil(this.canvas.height / this.baseCellSize);
+                
+                // 実際の描画領域を画面サイズに合わせて調整
+                this.actualCellWidth = this.canvas.width / this.cols;
+                this.actualCellHeight = this.canvas.height / this.rows;
+                
+                // パフォーマンス保護: グリッドサイズ制限
+                const maxCells = 5000; // 最大セル数を増加
+                if (this.cols * this.rows > maxCells) {
+                    const ratio = Math.sqrt(maxCells / (this.cols * this.rows));
+                    this.cols = Math.ceil(this.cols * ratio);
+                    this.rows = Math.ceil(this.rows * ratio);
+                    
+                    // 再計算
+                    this.actualCellWidth = this.canvas.width / this.cols;
+                    this.actualCellHeight = this.canvas.height / this.rows;
+                }
+                
+                // 最小グリッドサイズ保証
+                this.cols = Math.max(20, this.cols);
+                this.rows = Math.max(15, this.rows);
+                
+                // 最終的な実際のセルサイズ
+                this.actualCellWidth = this.canvas.width / this.cols;
+                this.actualCellHeight = this.canvas.height / this.rows;
+                
+                // グリッド初期化（初期文字で埋める）
+                this.grid = Array(this.rows).fill().map(() => Array(this.cols).fill().map(() => ({
+                    char: '.',
+                    color: this.colors[0],
+                    lastUpdate: 0
+                })));
+                
+                this.prevGrid = JSON.parse(JSON.stringify(this.grid));
+                
+                // フォントサイズマップ初期化
+                this.fontSizeMap = Array(this.rows).fill().map(() => Array(this.cols).fill(this.baseCellSize));
+                
+                // フォント設定
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+                
+                // セルオートマタも再初期化
+                this.initCellularAutomata();
+                
+                // 情報表示更新
+                this.updateSizeInfo();
+            }
+            
+            initCellularAutomata() {
+                this.cellularAutomata = Array(this.rows).fill().map(() => 
+                    Array(this.cols).fill().map(() => Math.random() > 0.7 ? 1 : 0)
+                );
+            }
+            
+            updateMouseTrail() {
+                this.mouseTrail.addPoint(this.mouseX, this.mouseY, performance.now());
+                this.mouseSpeed = this.mouseTrail.getSpeed();
+                
+                // フォントサイズマップ更新（必要なパラメータを渡す）
+                const influenceMap = this.mouseTrail.getInfluenceMap(
+                    this.cols, 
+                    this.rows, 
+                    this.actualCellWidth, 
+                    this.actualCellHeight
+                );
+                
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        const influence = influenceMap[row][col];
+                        const speedFactor = Math.min(this.mouseSpeed / 100, 3); // 最大3倍
+                        const targetSize = this.baseCellSize * (1 + influence * speedFactor);
+                        
+                        // 滑らかなサイズ変化
+                        this.fontSizeMap[row][col] = this.fontSizeMap[row][col] * 0.9 + targetSize * 0.1;
+                    }
+                }
+            }
+            
+            // [既存のパターン生成メソッドは省略 - 前回と同じ]
+            generatePattern() {
+                const currentTime = this.time;
+                
+                switch (this.patternMode) {
+                    case 0: this.generateRandomPattern(); break;
+                    case 1: this.generateBuildingPattern(); break;
+                    case 2: this.generateWavePattern(); break;
+                    case 3: this.generateMandelbrotPattern(); break;
+                    case 4: this.generateJuliaPattern(); break;
+                    case 5: this.generateCellularAutomataPattern(); break;
+                    case 6: this.generateSpiralPattern(); break;
+                    case 7: this.generateConcentricPattern(); break;
+                    case 8: this.generateFractalTreePattern(); break;
+                    case 9: this.generateOrganicPattern(); break;
+                }
+                
+                this.applyMouseEffect();
+                this.applyGlitchEffect();
+                this.applyGlobalEffects();
+            }
+            
+            generateRandomPattern() {
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        // 常に文字を配置（空文字なし）
+                        const charSet = Math.random() < 0.3 ? this.organicChars : this.chars;
+                        const char = charSet[Math.floor(Math.random() * charSet.length)];
+                        const colorIndex = Math.floor(Math.random() * this.colors.length);
+                        
+                        this.grid[row][col] = {
+                            char: char,
+                            color: this.colors[colorIndex],
+                            lastUpdate: this.time
+                        };
+                    }
+                }
+            }
+            
+            generateBuildingPattern() {
+                // まず背景を埋める
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        // 背景文字（空や星など）
+                        const bgChars = ['.', '·', '*', '˙', '•'];
+                        const char = bgChars[Math.floor(Math.random() * bgChars.length)];
+                        const colorIndex = Math.floor((col + this.time * 0.01) % this.colors.length);
+                        
+                        this.grid[row][col] = {
+                            char: char,
+                            color: this.colors[colorIndex],
+                            lastUpdate: this.time
+                        };
+                    }
+                }
+                
+                // 建物を上書き
+                for (let col = 0; col < this.cols; col++) {
+                    const buildingHeight = Math.floor(Math.sin(col * 0.05 + this.time * 0.02) * 15) + 
+                                         Math.floor(Math.cos(col * 0.1) * 10) + 20;
+                    const baseRow = Math.max(0, this.rows - buildingHeight);
+                    
+                    for (let row = baseRow; row < this.rows; row++) {
+                        let char;
+                        if (row === baseRow) {
+                            char = this.buildingChars[0];
+                        } else if (row === this.rows - 1) {
+                            char = this.buildingChars[1];
+                        } else {
+                            char = this.buildingChars[2 + Math.floor(Math.random() * 6)];
+                        }
+                        
+                        const colorIndex = Math.floor((col + row * 0.5) % this.colors.length);
+                        this.grid[row][col] = {
+                            char: char,
+                            color: this.colors[colorIndex],
+                            lastUpdate: this.time
+                        };
+                    }
+                }
+            }
+            
+            generateWavePattern() {
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        const wave1 = Math.sin(col * 0.1 + this.time * 0.05) * 8;
+                        const wave2 = Math.cos(col * 0.05 + this.time * 0.03) * 5;
+                        const wave3 = Math.sin(col * 0.2 + this.time * 0.07) * 3;
+                        
+                        const targetRow = Math.floor(this.rows / 2 + wave1 + wave2 + wave3);
+                        const distance = Math.abs(row - targetRow);
+                        
+                        let char, colorIndex;
+                        
+                        if (distance <= 3) {
+                            // 波の中心部
+                            const intensity = 3 - distance;
+                            const charIndex = Math.floor(intensity * 3);
+                            char = this.chars[Math.min(charIndex, this.chars.length - 2)]; // 空文字を避ける
+                            colorIndex = Math.floor((col + this.time * 0.1) % this.colors.length);
+                        } else {
+                            // 波の外部も文字で埋める
+                            const bgChars = ['~', '≈', '∿', '⁓', '∼'];
+                            char = bgChars[Math.floor((row + col + this.time * 0.05) % bgChars.length)];
+                            colorIndex = Math.floor((col * 0.5 + this.time * 0.05) % this.colors.length);
+                        }
+                        
+                        this.grid[row][col] = {
+                            char: char,
+                            color: this.colors[colorIndex],
+                            lastUpdate: this.time
+                        };
+                    }
+                }
+            }
+            
+            generateMandelbrotPattern() {
+                const zoom = this.mandelbrotZoom + this.time * 0.001;
+                const centerX = -0.5;
+                const centerY = 0;
+                
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        const x = (col - this.cols / 2) / (this.cols / 4) / zoom + centerX;
+                        const y = (row - this.rows / 2) / (this.rows / 4) / zoom + centerY;
+                        
+                        const iterations = this.mandelbrotIterations(x, y, 50);
+                        
+                        let char, colorIndex;
+                        
+                        if (iterations < 50) {
+                            // 発散する点
+                            const charIndex = iterations % this.fractalChars.length;
+                            char = this.fractalChars[charIndex];
+                            colorIndex = iterations % this.colors.length;
+                        } else {
+                            // 集合内の点も文字で表現
+                            const innerChars = ['█', '▓', '▒', '░'];
+                            char = innerChars[Math.floor((row + col) % innerChars.length)];
+                            colorIndex = 0; // 基本色
+                        }
+                        
+                        this.grid[row][col] = {
+                            char: char,
+                            color: this.colors[colorIndex],
+                            lastUpdate: this.time
+                        };
+                    }
+                }
+            }
+            
+            mandelbrotIterations(cx, cy, maxIter) {
+                let x = 0, y = 0;
+                let iter = 0;
+                
+                while (x * x + y * y <= 4 && iter < maxIter) {
+                    const xTemp = x * x - y * y + cx;
+                    y = 2 * x * y + cy;
+                    x = xTemp;
+                    iter++;
+                }
+                
+                return iter;
+            }
+            
+            generateJuliaPattern() {
+                this.juliaC.real = -0.8 + Math.sin(this.time * 0.01) * 0.2;
+                this.juliaC.imag = 0.156 + Math.cos(this.time * 0.015) * 0.1;
+                
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        const x = (col - this.cols / 2) / (this.cols / 4);
+                        const y = (row - this.rows / 2) / (this.rows / 4);
+                        
+                        const iterations = this.juliaIterations(x, y, this.juliaC, 30);
+                        
+                        let char, colorIndex;
+                        
+                        if (iterations < 30) {
+                            // 発散する点
+                            const charIndex = iterations % this.fractalChars.length;
+                            char = this.fractalChars[charIndex];
+                            colorIndex = iterations % this.colors.length;
+                        } else {
+                            // 集合内の点
+                            const innerChars = ['◉', '◎', '●', '○'];
+                            char = innerChars[Math.floor((row + col + this.time * 0.1) % innerChars.length)];
+                            colorIndex = Math.floor(this.time * 0.01) % this.colors.length;
+                        }
+                        
+                        this.grid[row][col] = {
+                            char: char,
+                            color: this.colors[colorIndex],
+                            lastUpdate: this.time
+                        };
+                    }
+                }
+            }
+            
+            juliaIterations(x, y, c, maxIter) {
+                let iter = 0;
+                
+                while (x * x + y * y <= 4 && iter < maxIter) {
+                    const xTemp = x * x - y * y + c.real;
+                    y = 2 * x * y + c.imag;
+                    x = xTemp;
+                    iter++;
+                }
+                
+                return iter;
+            }
+            
+            generateCellularAutomataPattern() {
+                if (this.time % 5 === 0) {
+                    const newCA = Array(this.rows).fill().map(() => Array(this.cols).fill(0));
+                    
+                    for (let row = 1; row < this.rows - 1; row++) {
+                        for (let col = 1; col < this.cols - 1; col++) {
+                            let neighbors = 0;
+                            for (let dr = -1; dr <= 1; dr++) {
+                                for (let dc = -1; dc <= 1; dc++) {
+                                    if (dr === 0 && dc === 0) continue;
+                                    neighbors += this.cellularAutomata[row + dr][col + dc];
+                                }
+                            }
+                            
+                            if (this.cellularAutomata[row][col] === 1) {
+                                newCA[row][col] = (neighbors === 2 || neighbors === 3) ? 1 : 0;
+                            } else {
+                                newCA[row][col] = (neighbors === 3) ? 1 : 0;
+                            }
+                        }
+                    }
+                    
+                    this.cellularAutomata = newCA;
+                }
+                
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        let char, colorIndex;
+                        
+                        if (this.cellularAutomata[row][col] === 1) {
+                            // 生きているセル
+                            char = this.organicChars[Math.floor(Math.random() * this.organicChars.length)];
+                            colorIndex = Math.floor((row + col + this.time * 0.1) % this.colors.length);
+                        } else {
+                            // 死んでいるセルも文字で表現
+                            const deadChars = ['·', '.', '˙', '•', '‧'];
+                            char = deadChars[(row + col) % deadChars.length];
+                            colorIndex = (Math.floor(this.time * 0.05) + 1) % this.colors.length;
+                        }
+                        
+                        this.grid[row][col] = {
+                            char: char,
+                            color: this.colors[colorIndex],
+                            lastUpdate: this.time
+                        };
+                    }
+                }
+            }
+            
+            generateSpiralPattern() {
+                const centerX = this.cols / 2;
+                const centerY = this.rows / 2;
+                
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        const dx = col - centerX;
+                        const dy = row - centerY;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        const angle = Math.atan2(dy, dx);
+                        
+                        const spiralValue = Math.sin(distance * 0.2 + angle * 3 + this.time * 0.1);
+                        
+                        let char, colorIndex;
+                        
+                        if (spiralValue > 0.3) {
+                            // 螺旋のメイン部分
+                            char = this.fractalChars[Math.floor(distance) % this.fractalChars.length];
+                            colorIndex = Math.floor((angle * 4 + this.time * 0.1) % this.colors.length);
+                        } else {
+                            // 螺旋の外部も文字で埋める
+                            const bgChars = ['⋅', '∘', '○', '◦', '⊙'];
+                            char = bgChars[Math.floor((distance + this.time * 0.05) % bgChars.length)];
+                            colorIndex = Math.floor((distance * 0.1 + this.time * 0.02) % this.colors.length);
+                        }
+                        
+                        this.grid[row][col] = {
+                            char: char,
+                            color: this.colors[colorIndex],
+                            lastUpdate: this.time
+                        };
+                    }
+                }
+            }
+            
+            generateConcentricPattern() {
+                const centerX = this.cols / 2;
+                const centerY = this.rows / 2;
+                
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        const dx = col - centerX;
+                        const dy = row - centerY;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        
+                        const ring = Math.floor(distance / 10 + this.time * 0.1) % 3;
+                        
+                        let char, colorIndex;
+                        
+                        if (ring === 0) {
+                            // メインリング
+                            char = this.organicChars[Math.floor(distance) % this.organicChars.length];
+                            colorIndex = Math.floor(distance * 0.1) % this.colors.length;
+                        } else {
+                            // その他の部分も文字で埋める
+                            const otherChars = ['∞', '∿', '≈', '~', '⁓'];
+                            char = otherChars[Math.floor((distance + ring * 5) % otherChars.length)];
+                            colorIndex = (ring + Math.floor(this.time * 0.05)) % this.colors.length;
+                        }
+                        
+                        this.grid[row][col] = {
+                            char: char,
+                            color: this.colors[colorIndex],
+                            lastUpdate: this.time
+                        };
+                    }
+                }
+            }
+            
+            generateFractalTreePattern() {
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        let x = col;
+                        let y = row;
+                        let chaos = 0;
+                        
+                        for (let i = 0; i < 10; i++) {
+                            if ((x & y) !== 0) {
+                                chaos++;
+                            }
+                            x >>= 1;
+                            y >>= 1;
+                        }
+                        
+                        let char, colorIndex;
+                        
+                        if (chaos % 2 === 1) {
+                            // フラクタル部分
+                            char = this.fractalChars[chaos % this.fractalChars.length];
+                            colorIndex = (chaos + this.time * 0.05) % this.colors.length;
+                        } else {
+                            // 背景部分も文字で埋める
+                            const bgChars = ['▫', '▪', '◽', '◾', '◻'];
+                            char = bgChars[chaos % bgChars.length];
+                            colorIndex = (chaos * 2 + Math.floor(this.time * 0.03)) % this.colors.length;
+                        }
+                        
+                        this.grid[row][col] = {
+                            char: char,
+                            color: this.colors[Math.floor(colorIndex)],
+                            lastUpdate: this.time
+                        };
+                    }
+                }
+            }
+            
+            generateOrganicPattern() {
+                // まず全体を背景文字で埋める
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        const bgChars = ['░', '▒', '▓', '·', '∙'];
+                        const char = bgChars[(row + col + Math.floor(this.time * 0.1)) % bgChars.length];
+                        const colorIndex = Math.floor((row * 0.1 + col * 0.1 + this.time * 0.02) % this.colors.length);
+                        
+                        this.grid[row][col] = {
+                            char: char,
+                            color: this.colors[colorIndex],
+                            lastUpdate: this.time
+                        };
+                    }
+                }
+                
+                // DLA風の成長を上書き
+                for (let i = 0; i < 5; i++) {
+                    let x = Math.floor(Math.random() * this.cols);
+                    let y = Math.floor(Math.random() * this.rows);
+                    
+                    for (let step = 0; step < 100; step++) {
+                        const dx = Math.floor(Math.random() * 3) - 1;
+                        const dy = Math.floor(Math.random() * 3) - 1;
+                        x = Math.max(0, Math.min(this.cols - 1, x + dx));
+                        y = Math.max(0, Math.min(this.rows - 1, y + dy));
+                        
+                        // 既存の構造があるかチェック（背景文字以外）
+                        if (this.organicChars.includes(this.grid[y][x].char)) {
+                            const char = this.organicChars[Math.floor(Math.random() * this.organicChars.length)];
+                            const colorIndex = Math.floor(Math.random() * this.colors.length);
+                            
+                            this.grid[y][x] = {
+                                char: char,
+                                color: this.colors[colorIndex],
+                                lastUpdate: this.time
+                            };
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            applyMouseEffect() {
+                const mouseCol = Math.floor(this.mouseX / this.actualCellWidth);
+                const mouseRow = Math.floor(this.mouseY / this.actualCellHeight);
+                const effectRadius = 500;
+                
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        const distance = Math.sqrt(
+                            Math.pow((col * this.actualCellWidth + this.actualCellWidth/2) - this.mouseX, 2) +
+                            Math.pow((row * this.actualCellHeight + this.actualCellHeight/2) - this.mouseY, 2)
+                        );
+                        
+                        if (distance < effectRadius) {
+                            const intensity = 1 - (distance / effectRadius);
+                            
+                            if (Math.random() < intensity * 0.3) {
+                                const charSet = intensity > 0.7 ? this.fractalChars : this.chars;
+                                const char = charSet[Math.floor(Math.random() * charSet.length)];
+                                const colorIndex = Math.floor((this.time * 0.1 + distance * 0.01) % this.colors.length);
+                                
+                                this.grid[row][col] = {
+                                    char: char,
+                                    color: this.colors[colorIndex],
+                                    lastUpdate: this.time
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+            
+            applyGlitchEffect() {
+                if (this.glitchMode && Math.random() < 0.1) {
+                    for (let i = 0; i < 20; i++) {
+                        const row = Math.floor(Math.random() * this.rows);
+                        const col = Math.floor(Math.random() * this.cols);
+                        
+                        this.grid[row][col] = {
+                            char: String.fromCharCode(33 + Math.floor(Math.random() * 94)),
+                            color: this.colors[Math.floor(Math.random() * this.colors.length)],
+                            lastUpdate: this.time
+                        };
+                    }
+                }
+            }
+            
+            applyGlobalEffects() {
+                // 色反転効果の減衰
+                if (this.globalEffects.invert > 0) {
+                    this.globalEffects.invert *= 0.95;
+                }
+                
+                // データクラッシュ効果の減衰
+                if (this.globalEffects.dataCrash > 0) {
+                    this.globalEffects.dataCrash *= 0.90;
+                    
+                    if (Math.random() < this.globalEffects.dataCrash) {
+                        for (let i = 0; i < 50; i++) {
+                            const row = Math.floor(Math.random() * this.rows);
+                            const col = Math.floor(Math.random() * this.cols);
+                            
+                            this.grid[row][col] = {
+                                char: String.fromCharCode(33 + Math.floor(Math.random() * 94)),
+                                color: this.colors[Math.floor(Math.random() * this.colors.length)],
+                                lastUpdate: this.time
+                            };
+                        }
+                    }
+                }
+                
+                // 波形歪曲効果の減衰
+                if (this.globalEffects.waveDistort > 0) {
+                    this.globalEffects.waveDistort *= 0.92;
+                }
+            }
+            
+
+            
+            render() {
+                // 大きなフォントサイズでのパフォーマンス最適化
+                const isLargeFont = this.baseCellSize > 16;
+                const shouldOptimize = isLargeFont && this.cols * this.rows > 1000;
+                
+                // 差分レンダリング（画面全体カバー対応）
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        const current = this.grid[row][col];
+                        const prev = this.prevGrid[row][col];
+                        const fontSize = this.fontSizeMap[row][col];
+                        
+                        if (current.char !== prev.char || current.color !== prev.color || 
+                            Math.abs(fontSize - this.baseCellSize) > 0.5) {
+                            
+                            // 実際のセルサイズを使用して画面全体を覆う
+                            const x = col * this.actualCellWidth + this.actualCellWidth / 2;
+                            const y = row * this.actualCellHeight + this.actualCellHeight / 2;
+                            
+                            // 背景をクリア（実際のセルサイズに応じて調整）
+                            const clearWidth = this.actualCellWidth + 2;
+                            const clearHeight = this.actualCellHeight + 2;
+                            this.ctx.fillStyle = '#000';
+                            this.ctx.fillRect(
+                                col * this.actualCellWidth - 1, 
+                                row * this.actualCellHeight - 1, 
+                                clearWidth, clearHeight
+                            );
+                            
+                            // 全ての文字を描画
+                            this.ctx.font = `${Math.floor(fontSize)}px Courier New`;
+                            
+                            // 色反転効果適用
+                            let color = current.color;
+                            if (this.globalEffects.invert > 0 && Math.random() < this.globalEffects.invert) {
+                                color = this.invertColor(color);
+                            }
+                            
+                            // 文字を描画
+                            this.ctx.fillStyle = color;
+                            this.ctx.fillText(current.char, x, y);
+                            
+                            this.prevGrid[row][col] = { ...current };
+                        }
+                    }
+                }
+            }
+            
+
+            
+            invertColor(color) {
+                // 16進数カラーを反転
+                if (color.startsWith('#')) {
+                    const hex = color.slice(1);
+                    const r = 255 - parseInt(hex.slice(0, 2), 16);
+                    const g = 255 - parseInt(hex.slice(2, 4), 16);
+                    const b = 255 - parseInt(hex.slice(4, 6), 16);
+                    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+                }
+                return color;
+            }
+            
+            setupEvents() {
+                // マウス/タッチ移動イベント
+                const handleMove = (e) => {
+                    const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+                    const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+                    if (clientX !== undefined && clientY !== undefined) {
+                        this.mouseX = clientX;
+                        this.mouseY = clientY;
+                    }
+                };
+                
+                this.canvas.addEventListener('mousemove', handleMove);
+                this.canvas.addEventListener('touchmove', (e) => {
+                    e.preventDefault();
+                    handleMove(e);
+                }, { passive: false });
+                
+                // クリック/タッチイベント
+                const handleTouch = (e) => {
+                    e.preventDefault();
+                    this.triggerDestructiveGlitch();
+                };
+                
+                this.canvas.addEventListener('click', handleTouch);
+                this.canvas.addEventListener('touchstart', handleTouch, { passive: false });
+                
+                // UIボタンイベント
+                document.getElementById('font-minus').addEventListener('click', () => {
+                    if (this.baseCellSize > this.minCellSize) {
+                        this.baseCellSize -= 2;
+                        this.resize();
+                        this.generatePattern();
+                    }
+                });
+                
+                document.getElementById('font-plus').addEventListener('click', () => {
+                    if (this.baseCellSize < this.maxCellSize) {
+                        this.baseCellSize += 2;
+                        this.resize();
+                        this.generatePattern();
+                    }
+                });
+                
+                document.getElementById('pattern-cycle').addEventListener('click', () => {
+                    this.togglePattern();
+                });
+                
+                document.getElementById('color-cycle').addEventListener('click', () => {
+                    this.cycleColors();
+                });
+                
+                document.getElementById('glitch-toggle').addEventListener('click', () => {
+                    this.toggleGlitch();
+                });
+                
+                document.getElementById('effect-invert').addEventListener('click', () => {
+                    this.globalInvert();
+                });
+                
+                document.getElementById('effect-crash').addEventListener('click', () => {
+                    this.globalDataCrash();
+                });
+                
+                document.getElementById('effect-wave').addEventListener('click', () => {
+                    this.globalWaveDistort();
+                });
+                
+                document.getElementById('reset').addEventListener('click', () => {
+                    this.reset();
+                });
+                
+                // タッチイベントの最適化
+                document.querySelectorAll('.controls button').forEach(button => {
+                    button.addEventListener('touchstart', (e) => {
+                        e.preventDefault();
+                        button.style.transform = 'scale(0.95)';
+                    }, { passive: false });
+                    
+                    button.addEventListener('touchend', (e) => {
+                        e.preventDefault();
+                        button.style.transform = 'scale(1)';
+                    }, { passive: false });
+                });
+                
+                // キーボード操作（デスクトップ向け補助）
+                document.addEventListener('keydown', (e) => {
+                    switch (e.code) {
+                        case 'Space':
+                            e.preventDefault();
+                            this.cycleColors();
+                            break;
+                        case 'KeyG':
+                            this.toggleGlitch();
+                            break;
+                        case 'KeyP':
+                            this.togglePattern();
+                            break;
+                        case 'KeyR':
+                            this.reset();
+                            break;
+                        case 'Equal':
+                        case 'NumpadAdd':
+                            e.preventDefault();
+                            if (this.baseCellSize < this.maxCellSize) {
+                                this.baseCellSize += 2;
+                                this.resize();
+                                this.generatePattern();
+                            }
+                            break;
+                        case 'Minus':
+                        case 'NumpadSubtract':
+                            e.preventDefault();
+                            if (this.baseCellSize > this.minCellSize) {
+                                this.baseCellSize -= 2;
+                                this.resize();
+                                this.generatePattern();
+                            }
+                            break;
+                        case 'Digit1':
+                            this.globalInvert();
+                            break;
+                        case 'Digit2':
+                            this.globalDataCrash();
+                            break;
+                        case 'Digit3':
+                            this.globalWaveDistort();
+                            break;
+                    }
+                });
+                
+                window.addEventListener('resize', () => {
+                    this.resize();
+                });
+            }
+            
+            triggerDestructiveGlitch() {
+                // 軽量グリッチ効果（マウス中心の放射状）
+                const glitchCenterX = Math.floor(this.mouseX / this.actualCellWidth);
+                const glitchCenterY = Math.floor(this.mouseY / this.actualCellHeight);
+                const maxRadius = 30;
+                
+                for (let i = 0; i < 150; i++) {
+                    const radius = Math.random() * maxRadius;
+                    const angle = Math.random() * Math.PI * 2;
+                    const col = Math.floor(glitchCenterX + Math.cos(angle) * radius);
+                    const row = Math.floor(glitchCenterY + Math.sin(angle) * radius);
+                    
+                    if (row >= 0 && row < this.rows && col >= 0 && col < this.cols) {
+                        // 3種類のグリッチパターンをランダム適用
+                        const glitchType = Math.floor(Math.random() * 3);
+                        
+                        switch (glitchType) {
+                            case 0: // 文字変更
+                                this.grid[row][col].char = this.destructiveChars[Math.floor(Math.random() * this.destructiveChars.length)];
+                                break;
+                            case 1: // 色変更
+                                this.grid[row][col].color = this.colors[Math.floor(Math.random() * this.colors.length)];
+                                break;
+                            case 2: // 完全ランダム
+                                this.grid[row][col] = {
+                                    char: String.fromCharCode(33 + Math.floor(Math.random() * 94)),
+                                    color: this.colors[Math.floor(Math.random() * this.colors.length)],
+                                    lastUpdate: this.time
+                                };
+                                break;
+                        }
+                        
+                        this.grid[row][col].lastUpdate = this.time;
+                    }
+                }
+            }
+            
+            // グローバルエフェクト実装
+            globalInvert() {
+                this.globalEffects.invert = 1.0;
+                
+                // 即座に全画面反転
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        this.grid[row][col].color = this.invertColor(this.grid[row][col].color);
+                    }
+                }
+            }
+            
+            globalDataCrash() {
+                this.globalEffects.dataCrash = 1.0;
+                
+                // 即座にデータクラッシュ開始
+                for (let i = 0; i < 1000; i++) {
+                    const row = Math.floor(Math.random() * this.rows);
+                    const col = Math.floor(Math.random() * this.cols);
+                    
+                    this.grid[row][col] = {
+                        char: String.fromCharCode(33 + Math.floor(Math.random() * 94)),
+                        color: Math.random() > 0.5 ? '#ff0000' : '#ffffff',
+                        lastUpdate: this.time
+                    };
+                }
+            }
+            
+            globalWaveDistort() {
+                // 軽量波形効果（フォントサイズのみ）
+                this.globalEffects.waveDistort = 1.0;
+                
+                // フォントサイズを瞬時に波形変化
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        const wave = Math.sin(row * 0.2 + col * 0.2);
+                        this.fontSizeMap[row][col] = this.baseCellSize * (1 + wave * 0.8);
+                        
+                        // 文字も変更
+                        if (Math.random() < 0.3) {
+                            this.grid[row][col].char = this.chars[Math.floor(Math.random() * this.chars.length)];
+                        }
+                    }
+                }
+            }
+            
+            cycleColors() {
+                // 劇的な色テーマ変更
+                this.currentThemeIndex = (this.currentThemeIndex + 1) % this.colorThemes.length;
+                this.colors = this.colorThemes[this.currentThemeIndex];
+                
+                // 既存のすべての文字の色を新しいテーマで更新
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        if (this.grid[row][col].char !== ' ') {
+                            // 新しいテーマからランダムに色を選択
+                            this.grid[row][col].color = this.colors[Math.floor(Math.random() * this.colors.length)];
+                            this.grid[row][col].lastUpdate = this.time;
+                        }
+                    }
+                }
+            }
+            
+            togglePattern() {
+                this.patternMode = (this.patternMode + 1) % this.patternNames.length;
+                this.updatePatternInfo();
+                if (this.patternMode === 5) {
+                    this.initCellularAutomata();
+                }
+            }
+            
+            toggleGlitch() {
+                this.glitchMode = !this.glitchMode;
+                this.updateButtonStates();
+            }
+            
+            updateButtonStates() {
+                // ボタンの状態を視覚的に更新
+                const glitchBtn = document.getElementById('glitch-toggle');
+                
+                if (glitchBtn) {
+                    glitchBtn.style.background = this.glitchMode ? '#00ff00' : '#000';
+                    glitchBtn.style.color = this.glitchMode ? '#000' : '#00ff00';
+                }
+            }
+            
+            updatePatternInfo() {
+                const patternSymbols = ['◇', '🏢', '〜', '❋', '✧', '◎', '🌀', '⊚', '🌳', '🔬'];
+                document.getElementById('pattern-info').textContent = 
+                    `${patternSymbols[this.patternMode]}${this.patternNames[this.patternMode]}`;
+            }
+            
+            updateSizeInfo() {
+                const sizeInfo = document.getElementById('size-info');
+                if (sizeInfo) {
+                    const cellCount = this.cols * this.rows;
+                    sizeInfo.textContent = 
+                        `Font: ${this.baseCellSize}px | Grid: ${this.cols}×${this.rows}`;
+                }
+            }
+            
+            reset() {
+                this.time = 0;
+                this.currentColorIndex = 0;
+                this.currentThemeIndex = 0;
+                this.colors = this.colorThemes[0];
+                this.glitchMode = false;
+                this.patternMode = 0;
+                this.mouseTrail = new MouseTrail();
+                this.globalEffects = { invert: 0, dataCrash: 0, waveDistort: 0 };
+                
+                // フォントサイズをデフォルトに戻す
+                this.baseCellSize = 8;
+                
+                // グリッドとフォントサイズマップリセット
+                this.resize();
+                
+                this.initCellularAutomata();
+                this.updatePatternInfo();
+                this.updateSizeInfo();
+                this.updateButtonStates();
+            }
+            
+            animate() {
+                this.time += 1;
+                
+                // マウス軌跡更新
+                this.updateMouseTrail();
+                
+                // パターン生成（軽量化）
+                if (this.time % 2 === 0) {
+                    this.generatePattern();
+                }
+                
+                this.render();
+                requestAnimationFrame(() => this.animate());
+            }
+        }
+        
+        // 初期化
+        let ascii;
+        document.addEventListener('DOMContentLoaded', () => {
+            ascii = new ASCIIArt();
+        });
+    </script>
+</body>
+</html>
